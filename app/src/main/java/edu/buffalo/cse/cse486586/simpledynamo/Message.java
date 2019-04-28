@@ -4,11 +4,21 @@ public class Message {
     String key;
     String message;
     String assigned_node;
+    int version;
 
-    Message(String k, String msg, String assigned_node){
+    Message(String k, String msg, String assigned_node, int v){
         this.key = k;
         this.message = msg;
         this.assigned_node = assigned_node;
+        this.version = v;
+    }
+
+    public int getVersion(){
+        return version;
+    }
+
+    public void setVersion(int v){
+        this.version = v;
     }
 
     public String getKey() {
