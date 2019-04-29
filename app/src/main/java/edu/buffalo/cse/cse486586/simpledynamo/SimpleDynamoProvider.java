@@ -11,7 +11,9 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.acl.LastOwnerException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Formatter;
 import java.util.Iterator;
 import java.util.ListIterator;
@@ -234,7 +236,21 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 							//returning cursor to target_node
 
-						} //end of else if navi_query
+						} //end of else if QUERY_KEY
+						else if("GIMME_ALL".equals(msg_string[0])){
+							String response_msg="";
+							itr = msgs.listIterator();
+							while(itr.hasNext()) {
+								Message m2 = itr.next();
+								if(m2.getAssignedNode().equals(myPort)){
+									response_msg = response_msg + m2.getKey() + "," + m2.getMessage()+"_";
+								}
+							}
+							out.println(response_msg);
+							break;
+
+
+						} //end of else if QUERY_KEY
 						else if ("AAI_GAYU".equals(temp)) {
 							break;
 						} else {
@@ -338,7 +354,40 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 				}
-				else if(c_msgs[0].equals("update_msg")){
+				else if(c_msgs[0].equals("GIMME_ALL")){
+					String msgToSend = c_msgs[0];
+					String responses=null;
+					for( int i=0; i<remotePorts.size(); i++){
+						Log.e(P_TAG, "Client querying for key = " + c_msgs[1] + " to server = " + remotePorts.get(i));
+						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
+						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
+						out = new PrintWriter(socket.getOutputStream(), true);
+						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+						// msgToSend = QUERY, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(msgToSend);
+						out.println("AAI_GAYU");
+						String temp;
+						responses = responses + in.readLine();
+
+						while ((temp = in.readLine()) != null) {
+							if ("SERVER_AAI_GAYU".equals(temp)) {
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								break;
+							}
+						}
+					}
+					Log.e(P_TAG, "MEGA RESPONSES = " + responses);
+					String[] pairs = responses.split("_");
+					String[] cols = {"key","value"};
+					MatrixCursor m2 = new MatrixCursor(cols, 1);
+					for(int i=0; i<pairs.length; i++){
+						String[] message = pairs[i].split(",");
+						String[] value = {message[0], message[1]}; //key, value (of highest version number)
+						Log.e(P_TAG, "CURSOR KEY_VALUE PAIR: "+ value[0] + ", " + value[1]);
+						m2.addRow(value);
+					}
+					return m2;
 				} //end of else if navo_msg
 				else{
 					Log.e(P_TAG, "????????????    THIS SHOULD NEVER COME! CLIENT TASK LAST ELSE ???????????????????? ");
@@ -370,6 +419,122 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 
 	}
+
+	// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> partiks ServerTask ClientTask code end
+
+	@Override
+	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+		Log.e(P_TAG, "Called QUERY " + selection + " from SimpleDhtProvider " + myPort);
+		ListIterator<Message> itr;
+		if(!selection.equals("*") && !selection.equals("@")){ // queried with a specific key
+			Log.e(P_TAG, "KEY PART OF IF ENTERED !");
+			String msgToSend = "QUERY_KEY" + "," + selection;
+			AsyncTask<String, String, MatrixCursor> as = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
+			Log.e(P_TAG, "AFTER CLIENT TASK RETURNED CURSOR FOR KEY = "+ selection+" , ELSE PART IN QUERY OF OTHER NODES. Current node = " + portStr + " myPort = " + myPort);
+			try {
+				MatrixCursor mat2 = as.get();
+				mat2.moveToFirst();
+				Log.e(P_TAG, "FINAL ANSWER COLUMN COUNT = " + mat2.getColumnCount() + " " + mat2.getString(0) );
+
+				return mat2;
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			} catch (ExecutionException e) {
+				e.printStackTrace();
+			}
+
+
+		}else if(selection.equals("@")){
+			itr = msgs.listIterator();
+			String[] cols = {"key","value"};
+			MatrixCursor m = new MatrixCursor(cols, 1);
+			while(itr.hasNext()){
+				Message m2 = itr.next();
+				//Log.e(P_TAG, "m2 Key = " + m2.getKey() + " m2 msg = " + m2.getMessage() + "m2 assigned node = " + m2.getAssignedNode());
+				if(m2.getAssignedNode().equals( myPort )){
+					Log.e(P_TAG, "@@ 1 - MSG KEY: " + m2.getKey() + " Message: " + m2.getMessage() + " found for node: ");
+					String[] value = {m2.getKey(), m2.getMessage()};
+					m.addRow(value);
+				}
+			}
+			return m;
+		}
+
+		else if(selection.equals("*")){
+			Log.e(P_TAG, "CORRECTLY ENTERED * PART OF QUERY!!");
+			String msgToSend = "GIMME_ALL" + "," + myPort;
+			AsyncTask<String, String, MatrixCursor> as = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
+			Log.e(P_TAG, "AFTER CLIENT TASK RETURNED CURSOR FOR KEY = "+ selection+" , ELSE PART IN QUERY OF OTHER NODES. Current node = " + portStr + " myPort = " + myPort);
+			try {
+				MatrixCursor mat2 = as.get();
+				mat2.moveToFirst();
+				Log.e(P_TAG, "FINAL ANSWER COLUMN COUNT = " + mat2.getColumnCount() + " " + mat2.getString(0) );
+
+				return mat2;
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			} catch (ExecutionException e) {
+				e.printStackTrace();
+			}
+
+		} // end of "*" else if
+		else{
+			Log.e(P_TAG, "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
+			Log.e(P_TAG, "F");
+			Log.e(P_TAG, "ERROR ! QUERY LAST ELSE SHOULD NEVER REACH HERE, selection = "+selection);
+			Log.e(P_TAG, "F");
+			Log.e(P_TAG, "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
+			return null;
+		}
+		return null;
+	}
+
+	@Override
+	public int delete(Uri uri, String selection, String[] selectionArgs) {
+		Log.e(P_TAG, "Called DELETE from SimpleDhtProvider with key/filename: " + selection);
+		String filename = selection;
+		if(selection.equals("*")){ //TODO: implement delete * logic
+			msgs.removeAll(msgs);
+		}else if(selection.equals("@")){
+			msgs.removeAll(msgs);
+			/*int m_index=-1;
+			for(Message m: msgs){
+				if(m.getAssignedNode().equals(portStr)){
+					m_index = msgs.indexOf(m);
+					msgs.remove(m_index);
+				}
+			} */
+		}else{
+			int m_index=-1;
+			Message m2 = null;
+			for(Message m : msgs){
+				Log.e(P_TAG, "FINDING TO DELETE: " + m.getKey() + " - " + filename);
+				if(m.getKey().equals(filename)){
+					Log.e(P_TAG, "FOUND TO DELETE: " + m.getKey() + " - " + filename);
+					m_index = msgs.indexOf(m);
+					m2 = m;
+					break;
+				}
+			}
+
+			if(m_index != -1){
+				Log.e(P_TAG, "TRIED AND DELETED: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
+				//msgs.remove(m_index);
+				msgs.remove(m2);
+				msgs.
+
+				String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
+				File f = new File(path);
+				if(f.exists()){
+					f.delete();
+					return 0;
+				}
+			}
+			return 0;
+		}
+		return 0;
+	}
+
 
 	public String findAssignedNode(String key){
 		//String[] c_msg = m.split(",");
@@ -484,120 +649,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	}
 
 
-	// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> partiks ServerTask ClientTask code end
 
-	@Override
-	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
-		Log.e(P_TAG, "Called QUERY " + selection + " from SimpleDhtProvider " + myPort);
-		ListIterator<Message> itr;
-		if(!selection.equals("*") && !selection.equals("@")){ // queried with a specific key
-			Log.e(P_TAG, "KEY PART OF IF ENTERED !");
-			String msgToSend = "QUERY_KEY" + "," + selection;
-			AsyncTask<String, String, MatrixCursor> as = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
-			Log.e(P_TAG, "AFTER CLIENT TASK RETURNED CURSOR FOR KEY = "+ selection+" , ELSE PART IN QUERY OF OTHER NODES. Current node = " + portStr + " myPort = " + myPort);
-			try {
-				MatrixCursor mat2 = as.get();
-				mat2.moveToFirst();
-				Log.e(P_TAG, "FINAL ANSWER COLUMN COUNT = " + mat2.getColumnCount() + " " + mat2.getString(0) );
-
-				return mat2;
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			} catch (ExecutionException e) {
-				e.printStackTrace();
-			}
-
-
-		}else if(selection.equals("@")){
-			itr = msgs.listIterator();
-			String[] cols = {"key","value"};
-			MatrixCursor m = new MatrixCursor(cols, 1);
-			while(itr.hasNext()){
-				Message m2 = itr.next();
-				//Log.e(P_TAG, "m2 Key = " + m2.getKey() + " m2 msg = " + m2.getMessage() + "m2 assigned node = " + m2.getAssignedNode());
-				if(m2.getAssignedNode().equals( myPort )){
-					Log.e(P_TAG, "@@ 1 - MSG KEY: " + m2.getKey() + " Message: " + m2.getMessage() + " found for node: ");
-					String[] value = {m2.getKey(), m2.getMessage()};
-					m.addRow(value);
-				}else{
-					//not writing to log atm
-
-				}
-			}
-			return m;
-		}
-
-		else if(selection.equals("*")){
-			itr = msgs.listIterator();
-			String[] cols = {"key","value"};
-			MatrixCursor m = new MatrixCursor(cols, 1);
-			while(itr.hasNext()){
-				Message m2 = itr.next();
-				String[] value = {m2.getKey(), m2.getMessage()};
-				m.addRow(value);
-			}
-			return m;
-
-			/*itr = msgs.listIterator();
-			//String[] cols = {"key","value"};
-			MatrixCursor m = new MatrixCursor(cols, 1);
-			while(itr.hasNext()) {
-				Message m2 = itr.next();
-				if (m2.getKey().equals(selection)) {
-					String[] value = {m2.getKey(), m2.getMessage()};
-					m.addRow(value);
-					break;
-				}
-			}
-			return m; */
-		}
-		else{
-			Log.e(P_TAG, "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
-			Log.e(P_TAG, "F");
-			Log.e(P_TAG, "ERROR ! QUERY LAST ELSE SHOULD NEVER REACH HERE, selection = "+selection);
-			Log.e(P_TAG, "F");
-			Log.e(P_TAG, "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<");
-			return null;
-		}
-		return null;
-	}
-
-	@Override
-	public int delete(Uri uri, String selection, String[] selectionArgs) {
-		Log.e(P_TAG, "Called DELETE from SimpleDhtProvider with key/filename: " + selection);
-		String filename = selection;
-		if(selection.equals("*")){
-			msgs.removeAll(msgs);
-		}else if(selection.equals("@")){
-			int m_index=-1;
-			for(Message m: msgs){
-				if(m.getAssignedNode().equals(portStr)){
-					m_index = msgs.indexOf(m);
-					msgs.remove(m_index);
-				}
-			}
-		}else{
-			int m_index=-1;
-			for(Message m : msgs){
-				if(m.getKey().equals(filename)){
-					Log.e(P_TAG, "FINDING TO DELTE: " + m.getKey() + " - " + filename);
-					m_index = msgs.indexOf(m);
-				}
-			}
-			Log.e(P_TAG, "TRYING TO DELETE: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
-			msgs.remove(m_index);
-			String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
-			File f = new File(path);
-			if(f.exists()){
-				f.delete();
-				return 0;
-			}
-			return 0;
-		}
-		return 0;
-	}
-
-    private String genHash(String input) throws NoSuchAlgorithmException {
+	private String genHash(String input) throws NoSuchAlgorithmException {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
         byte[] sha1Hash = sha1.digest(input.getBytes());
         Formatter formatter = new Formatter();
