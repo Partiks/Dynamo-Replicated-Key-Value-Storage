@@ -50,6 +50,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 	int myIndex=-1;
 	int failed_index=-4;
 	static int sync_flag =0;
+	static int first_time_initialized=0;
 	String node_id;
 	public static void setRemotePorts(ArrayList<String> remotePorts) { SimpleDynamoProvider.remotePorts = remotePorts;}
 	public static ArrayList<String> getRemotePorts() { return remotePorts;}
@@ -103,6 +104,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		} */
 
 		//end partiks setup
+		first_time_initialized=1;
 		return false;
 	}
 
@@ -562,9 +564,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 						//if(flag != 0){ //if server is alive, only then read its response values and version number
 							Log.e(P_TAG, "Client got response for key = " + c_msgs[1] + " RESP: " + query_response);
 							String[] resp = query_response.split(",");
+							if(resp.length >= 2){
+								versions[i] = Integer.parseInt(resp[2]);
+								resp_values[i] = resp[1];
+							}
 							// key = resp[0], value = resp[1], version = resp[2]
-							versions[i] = Integer.parseInt(resp[2]);
-							resp_values[i] = resp[1];
 						//}
 
 					}
