@@ -42,7 +42,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 	static ArrayList<String> remotePorts = new ArrayList<String>();
 	static ArrayList<String> hashed_nodes = new ArrayList<String>();
 	ArrayList<Message> msgs = new ArrayList<Message>(); //msgs has the latest copy of the message
-	ArrayList<Message> stale_msgs = new ArrayList<Message>(); //older versions of the message
+	//ArrayList<Message> stale_msgs = new ArrayList<Message>(); //older versions of the message
 	String portStr="";
 	String myPort="";
 	static final int SERVER_PORT = 10000;
@@ -61,7 +61,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		TelephonyManager tel = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
 		portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
 		myPort = String.valueOf((Integer.parseInt(portStr) * 2));
-		remotePorts.add(myPort);
+		//remotePorts.add(myPort);
 
 		try {
 			remotePorts.add("11124");
@@ -191,7 +191,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 									//we only need to update the version number and message
 									msg_found_flag=1;
 									m = msgs.get(i);
-									stale_msgs.add(m);
+									//stale_msgs.add(m);
 									curr_version = m.getVersion();
 									msgs.set(i, new Message(m.getKey(), msg_string[2], m.getAssignedNode(), curr_version+1));
 								}
@@ -251,6 +251,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 						} //end of else if QUERY_KEY
+						else if("DELETE_ALL".equals(temp)){
+							Log.e(P_TAG, "SERVER GOT DELETE ALL REQUEST");
+							msgs.removeAll(msgs);
+							break;
+						}
 						else if ("AAI_GAYU".equals(temp)) {
 							break;
 						} else {
@@ -278,7 +283,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		protected MatrixCursor doInBackground(String... msgs2) {
 			String[] c_msgs = msgs2[0].split(",");
 			MatrixCursor m1 =null;
-			Log.e(P_TAG, "Client doinBackground: C_MSGS first string: " + c_msgs[0] + " msgs: " + msgs + " msgs types: " + msgs.getClass().getName() + " - " + msgs.getClass().getSimpleName());
+			Log.e(P_TAG, "Client doinBackground: C_MSGS first string: " + c_msgs[0]);
 			try {
 
 				if(c_msgs[0].equals("INSERT_MSG")){
@@ -286,9 +291,23 @@ public class SimpleDynamoProvider extends ContentProvider {
 					//now calculating the assigned_node and sending it the message
 					String node_response = findAssignedNode(c_msgs[1]);
 					String[] selected_nodes = node_response.split(",");
+					/*String[] selected_nodes = new String[3];
+					if(myPort.equals("11124")){
+						selected_nodes[0] = "11124"; selected_nodes[1] = "11112"; selected_nodes[2] = "11108";
+					}else if(myPort.equals("11112")){
+						selected_nodes[0] = "11112"; selected_nodes[1] = "11108"; selected_nodes[2] = "11116";
+					}else if(myPort.equals("11108")){
+						selected_nodes[0] = "11108"; selected_nodes[1] = "11116"; selected_nodes[2] = "11120";
+					}else if(myPort.equals("11116")){
+						selected_nodes[0] = "11116"; selected_nodes[1] = "11120"; selected_nodes[2] = "11124";
+					}else if(myPort.equals("11120")){
+						selected_nodes[0] = "11120"; selected_nodes[1] = "11124"; selected_nodes[2] = "11112";
+					}else{
+						Log.e(P_TAG, "IMPOSSIBLE, NEVER SHOULD REACH HERE ???????????????????????????????????????????????????????????????????????????????????????????????????????????");
+					} */
 					String msgToSend = "INSERT_MSG" + "," + c_msgs[1] + "," + c_msgs[2] + "," + selected_nodes[0] + "," + selected_nodes[1] + "," + selected_nodes[2];
 					for (int i=0; i<3 ; i++){ //send message to assigned node and 2 replicated nodes
-						Log.e(P_TAG, "Client sending and replicating key = " + c_msgs[1] + " value = " + c_msgs[2] + " to server = " + selected_nodes[i]);
+						Log.e(P_TAG, "Client sending and replicating key = " + c_msgs[1] + " value = " + c_msgs[2] + " to server = " + selected_nodes[i] + " i = " + i + " " + selected_nodes[0] + " " + selected_nodes[1] + " " + selected_nodes[2]);
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(selected_nodes[i]) );
 						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
 						out = new PrintWriter(socket.getOutputStream(), true);
@@ -310,6 +329,21 @@ public class SimpleDynamoProvider extends ContentProvider {
 				else if(c_msgs[0].equals("QUERY_KEY")){
 					String node_response = findAssignedNode(c_msgs[1]);
 					String[] selected_nodes = node_response.split(",");
+					/*String[] selected_nodes = new String[3];
+					Log.e(P_TAG, ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> MYPORT BITCHES = "+myPort);
+					if(myPort.equals("11124")){
+						selected_nodes[0] = "11124"; selected_nodes[1] = "11112"; selected_nodes[2] = "11108";
+					}else if(myPort.equals("11112")){
+						selected_nodes[0] = "11112"; selected_nodes[1] = "11108"; selected_nodes[2] = "11116";
+					}else if(myPort.equals("11108")){
+						selected_nodes[0] = "11108"; selected_nodes[1] = "11116"; selected_nodes[2] = "11120";
+					}else if(myPort.equals("11116")){
+						selected_nodes[0] = "11116"; selected_nodes[1] = "11120"; selected_nodes[2] = "11124";
+					}else if(myPort.equals("11120")){
+						selected_nodes[0] = "11120"; selected_nodes[1] = "11124"; selected_nodes[2] = "11112";
+					}else{
+						Log.e(P_TAG, "IMPOSSIBLE, NEVER SHOULD REACH HERE ???????????????????????????????????????????????????????????????????????????????????????????????????????????");
+					} */
 					String msgToSend = "QUERY_KEY" + "," + c_msgs[1] + "," + myPort + "," + selected_nodes[0] + "," + selected_nodes[1] + "," + selected_nodes[2];
 					String resp_values[] = new String[3];
 					int versions[]={0,0,0};
@@ -389,6 +423,27 @@ public class SimpleDynamoProvider extends ContentProvider {
 					}
 					return m2;
 				} //end of else if navo_msg
+				else if(c_msgs[0].equals("DELETE_ALL")){
+					String msgToSend = c_msgs[0];
+					for( int i=0; i<remotePorts.size(); i++){
+						Log.e(P_TAG, "Client sending DELETE COMMAND to server = " + remotePorts.get(i));
+						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
+						Log.e(P_TAG, "DELTE ALL * CLIENT TASK: " + msgs2[0]);
+						out = new PrintWriter(socket.getOutputStream(), true);
+						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+						// msgToSend = QUERY, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(msgToSend);
+						out.println("AAI_GAYU");
+						String temp;
+						while ((temp = in.readLine()) != null) {
+							if ("SERVER_AAI_GAYU".equals(temp)) {
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT DELETE ALL MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								break;
+							}
+						}
+					}
+				}
 				else{
 					Log.e(P_TAG, "????????????    THIS SHOULD NEVER COME! CLIENT TASK LAST ELSE ???????????????????? ");
 				}
@@ -403,7 +458,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			} catch (IOException e) {
 				Log.e(P_TAG, "WHY IT COME HERE THOUGH ????");
 				Log.e(P_TAG, "ClientTask socket IOException");
-				myPort="11108";
+				//myPort="11108";
 				Log.e(P_TAG, ">>>>>>>>>>>>>> EXCEPTION >>>>>> SELF PROCLAIMED SERVER CHANGED <<<<<<<<<<<<<<<<<<<<<<<<<<<");
 				String msgReceived="";
 				//publishProgress(msgReceived);
@@ -495,6 +550,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String filename = selection;
 		if(selection.equals("*")){ //TODO: implement delete * logic
 			msgs.removeAll(msgs);
+			String msgToSend = "DELETE_ALL";
+			new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
 		}else if(selection.equals("@")){
 			msgs.removeAll(msgs);
 			/*int m_index=-1;
@@ -521,7 +578,31 @@ public class SimpleDynamoProvider extends ContentProvider {
 				Log.e(P_TAG, "TRIED AND DELETED: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
 				//msgs.remove(m_index);
 				msgs.remove(m2);
-				msgs.
+
+
+				String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
+				File f = new File(path);
+				if(f.exists()){
+					f.delete();
+					return 0;
+				}
+			}
+			m2 = null;
+			for(Message m : msgs){
+				Log.e(P_TAG, "FINDING TO DELETE: " + m.getKey() + " - " + filename);
+				if(m.getKey().equals(filename)){
+					Log.e(P_TAG, "FOUND TO DELETE: " + m.getKey() + " - " + filename);
+					m_index = msgs.indexOf(m);
+					m2 = m;
+					break;
+				}
+			}
+
+			if(m_index != -1){
+				Log.e(P_TAG, "TRIED AND DELETED: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
+				//msgs.remove(m_index);
+				msgs.remove(m2);
+
 
 				String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
 				File f = new File(path);
