@@ -38,7 +38,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	private static final String VALUE_FIELD = "value";
 	private static final String NODE_FIELD = "node";
 	private static final String VERSION_FIELD = "version";
-	static int[] connected_sieve = {1,1,1,1,1};
+	static String failed_avd="";
+	static int[] connected_sieve = {0,0,0,0,0};
 	static ArrayList<String> remotePorts = new ArrayList<String>();
 	static ArrayList<String> hashed_nodes = new ArrayList<String>();
 	ArrayList<Message> msgs = new ArrayList<Message>(); //msgs has the latest copy of the message
@@ -47,6 +48,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	String myPort="";
 	static final int SERVER_PORT = 10000;
 	int myIndex=-1;
+	int failed_index=-4;
+	static int sync_flag =0;
 	String node_id;
 	public static void setRemotePorts(ArrayList<String> remotePorts) { SimpleDynamoProvider.remotePorts = remotePorts;}
 	public static ArrayList<String> getRemotePorts() { return remotePorts;}
@@ -62,6 +65,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
 		myPort = String.valueOf((Integer.parseInt(portStr) * 2));
 		//remotePorts.add(myPort);
+
 
 		try {
 			remotePorts.add("11124");
@@ -91,6 +95,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 			e.printStackTrace();
 		}
 		new SimpleDynamoProvider.ServerTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, serverSocket);
+
+		String msgToSend = "NODE_ONCREATE," + myPort;
+		new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
 		/*for (int i : connected_sieve){
 			connected_sieve[i]=0;
 		} */
@@ -113,6 +120,10 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String value = values.getAsString("value");
 		String assigned_node = values.getAsString("node");
 		String version = values.getAsString("version");
+
+		while(sync_flag==0){
+
+		}
 
 		if(assigned_node == null){ // new message inserted by grader
 
@@ -144,6 +155,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 			ServerSocket serverSocket = sockets[0];
 			Iterator<Message> itr;
 			Socket socket = null;
+			String sender = "";
+			int found_crashed_avd_flag = 0;
 
 			//reference for Java Socket API code: https://www.geeksforgeeks.org/socket-programming-in-java/
 			//reference for improved Java Socket API code: https://www.baeldung.com/a-guide-to-java-sockets
@@ -154,15 +167,37 @@ public class SimpleDynamoProvider extends ContentProvider {
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 					String temp;
+					sender = in.readLine();
 
 					while ((temp = in.readLine()) != null) {
+						found_crashed_avd_flag = 1;
 						Log.e(P_TAG, "SERVER READ A LINE:  = " + temp);
 						String msg_string[] = temp.split(",");
+						if ("GIVE_MY_MESSAGES".equals(msg_string[0])) {
+							//considering this is replica node and coordinator node is requesting messages
+							//String target_node = msg_string[1];
+							String selection_node = msg_string[2];
+							Log.e(P_TAG, "SERVER IMPORT REQUEST FROM "+sender + " SELECTION SERVER = " + selection_node);
+							itr = msgs.listIterator();
+							while(itr.hasNext()) {
+								Message m2 = itr.next();
+								if(m2.getAssignedNode().equals(selection_node)){
+									Log.e(P_TAG, "&& SENDING IMPORT REQ MSG "+m2.getKey() + " , message = " + m2.getMessage() + " ," + m2.getVersion() + " to " + sender);
+								}
+							}
+							String response_msg="";
+							itr = msgs.listIterator();
+							while(itr.hasNext()) {
+								Message m2 = itr.next();
+								if(m2.getAssignedNode().equals(selection_node)){
+									response_msg = response_msg + m2.getKey() + "," + m2.getMessage()+","+m2.getVersion()+"_";
+								}
+							}
+							out.println(response_msg);
+							break;
 
-						if ("NODE_REJOIN".equals(msg_string[0])) {
-
-							Log.e(P_TAG, "Node rejoin request from: " + msg_string[1] + " ");
-							remotePorts.add(msg_string[1]);
+						}else if ("NODE_ONCREATE".equals(msg_string[0])) {
+							Log.e(P_TAG, "Node create/rejoin request from: " + msg_string[1] + " ");
 							int re_node = Integer.parseInt(msg_string[1]);
 							if(re_node == 11112){ //avd 1
 								connected_sieve[1] = 1;
@@ -174,13 +209,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 							}
 							else if(re_node == 11116){ //avd 2
 								connected_sieve[3] = 1;
-							}else { Log.e(P_TAG, "SHOULD NEVER HAVE REACHED HERE! NODE REJOINING ELSE"); }
+							}
+							else if(re_node == 11108){ //avd 2
+								connected_sieve[2] = 1;
+							}
+							else { Log.e(P_TAG, "SHOULD NEVER HAVE REACHED HERE! NODE REJOINING ELSE"); }
 							break;
 
 						}else if("INSERT_MSG".equals(msg_string[0])){
 							Log.e(P_TAG, " SERVER GOT NEW MESSAGE KEY = " + msg_string[1] + " value = " + msg_string[2]);
 
-							//TODO: use assigned node function here in case of failed_node
 							//key = msg_string[1], value = msg_string[2]
 							// msg_string here = INSERT_MSG, KEY, VALUE, assigned_node, replication_node 1, replication node 2
 							int msg_found_flag =0;
@@ -200,7 +238,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 							//new message, doesn't exist in msgs queue
 							if(msg_found_flag == 0){
 								curr_version=1;
-								msgs.add( new Message(msg_string[1], msg_string[2], myPort, curr_version) );
+								msgs.add( new Message(msg_string[1], msg_string[2], msg_string[3], curr_version) );
 							}
 							// version is assigned to the message now time to store the message
 
@@ -217,6 +255,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 							cv.put(VERSION_FIELD, curr_version);
 
 							insert(uri, cv);
+							out.println("I'M ALIVE" + "," + myPort);
+							break;
 
 						} // end of else if NAVO_MSG
 
@@ -260,7 +300,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 							break;
 						} else {
 							Log.e(P_TAG, "WEIRD SERVER ENTERED LAST ELSE with msg: " + temp);
+							break;
 						}
+					}
+					if(found_crashed_avd_flag == 0){
+						Log.e(P_TAG, "SERVER FOUND CRASHED AVD --------------------->>>>>>>>>> " + sender);
+						failed_index = remotePorts.indexOf(sender);
+						//remotePorts.remove(sender);
+						connected_sieve[failed_index]=0;
+						failed_avd=sender;
+						Log.e(P_TAG, "SERVER FOUND CRASHED " + " failed_index = " + failed_index + " remotePorts.size() = " + remotePorts.size() + " failed_avd = " + failed_avd);
 					}
 					out.println("SERVER_AAI_GAYU");
 					in.close();
@@ -286,27 +335,133 @@ public class SimpleDynamoProvider extends ContentProvider {
 			Log.e(P_TAG, "Client doinBackground: C_MSGS first string: " + c_msgs[0]);
 			try {
 
-				if(c_msgs[0].equals("INSERT_MSG")){
+				if(c_msgs[0].equals("NODE_ONCREATE")){
+					for(int i=0; i<5; i++){
+						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
+						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
+						out = new PrintWriter(socket.getOutputStream(), true);
+						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+						out.println(myPort);
+						out.println(msgs2[0]);
+						String temp;
+						while ((temp = in.readLine()) != null) {
+							if ("SERVER_AAI_GAYU".equals(temp)) {
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								break;
+							}
+						}
+					}// end of broadcasting for loop
+
+					String my_rep_nodes[] = new String[2];
+					if(myPort.equals("11124")){
+						my_rep_nodes[0]="11112";
+						my_rep_nodes[1]="11108";
+					}else if(myPort.equals("11112")){
+						my_rep_nodes[0]="11108";
+						my_rep_nodes[1]="11116";
+					}else if(myPort.equals("11108")){
+						my_rep_nodes[0]="11116";
+						my_rep_nodes[1]="11120";
+					}else if(myPort.equals("11116")){
+						my_rep_nodes[0]="11120";
+						my_rep_nodes[1]="11124";
+					}else if(myPort.equals("11120")){
+						my_rep_nodes[0]="11124";
+						my_rep_nodes[1]="11112";
+					}
+					for(int i=0; i<2; i++){
+						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(my_rep_nodes[i]) );
+						Log.e(P_TAG, "COLLECTING MY OWN NODE "+ myPort+ " MESSAGES FROM  " + my_rep_nodes[i]);
+						out = new PrintWriter(socket.getOutputStream(), true);
+						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+						out.println(myPort);
+						out.println("GIVE_MY_MESSAGES"+ "," + myPort + "," + myPort); //first one is for getting result back from server, second one is for letting server know which target assigned_nodes we are searching for
+						String temp;
+						String result = in.readLine();
+						Log.e(P_TAG, "TROUBLING RESULT STRING =" + result + "())))))))))))))))))))))))))))))))))))))))))))))))))))))))((((((((((((((((((((((((((");
+						if(result == null || result.equals("")){
+							continue;
+						}
+						String own_pairs[] = result.split("_");
+						if(result == null || result.equals("") || own_pairs.length<1){
+							continue;
+						}
+						for(int j=0;j<own_pairs.length; j++){
+							String[] values = own_pairs[j].split(",");
+							// 0 - key, 1 - value, 2 - version
+							msgs.add(new Message(values[0], values[1], myPort, Integer.parseInt(values[2])) );
+							Log.e(P_TAG, "ORIGINAL OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2]);
+                    	}
+						while ((temp = in.readLine()) != null) {
+							if ("SERVER_AAI_GAYU".equals(temp)) {
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								break;
+							}
+						}
+					}// end of getting own messages for loop
+					//getting replication messages from two predecessors
+					String[] rep_nodes = new String[2];
+					if(myPort.equals("11124")){
+						rep_nodes[0]="11120";
+						rep_nodes[1]="11116";
+					}else if(myPort.equals("11112")){
+						rep_nodes[0]="11124";
+						rep_nodes[1]="11120";
+					}else if(myPort.equals("11108")){
+						rep_nodes[0]="11112";
+						rep_nodes[1]="11124";
+					}else if(myPort.equals("11116")){
+						rep_nodes[0]="11108";
+						rep_nodes[1]="11112";
+					}else if(myPort.equals("11120")){
+						rep_nodes[0]="11116";
+						rep_nodes[1]="11108";
+					}
+					for(int i=0; i<2; i++){
+						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(rep_nodes[i]) );
+						Log.e(P_TAG, "COLLECTING OTHER REPLICATION NODE "+ myPort+ " MESSAGES FROM  " + rep_nodes[i]);
+						out = new PrintWriter(socket.getOutputStream(), true);
+						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+						out.println(myPort);
+						out.println("GIVE_MY_MESSAGES"+ "," + myPort + "," + rep_nodes[i]); //first one is for getting result back from server, second one is for letting server know which target assigned_nodes we are searching for
+						//ideally, it should be GIVE_YOUR_MESSAGES
+						String temp;
+						String result = in.readLine();
+						if(result == null || result.equals("")){
+							continue;
+						}
+						String own_pairs[] = result.split("_");
+						if(result == null || result.equals("") || own_pairs.length<1){
+							continue;
+						}
+						for(int j=0;j<own_pairs.length; j++){
+							String[] values = own_pairs[j].split(",");
+							// 0 - key, 1 - value, 2 - version
+							msgs.add(new Message(values[0], values[1], rep_nodes[i], Integer.parseInt(values[2])) );
+							Log.e(P_TAG, "REPLICATION OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " FROM SERVER = " + rep_nodes[i]);
+						}
+						while ((temp = in.readLine()) != null) {
+							if ("SERVER_AAI_GAYU".equals(temp)) {
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								break;
+							}
+						}
+					}
+					sync_flag=1; //sync complete
+
+
+				}else if(c_msgs[0].equals("INSERT_MSG")){
 					// 0 = insert_msg, 1 = key, 2 = value, 3 = myIndex, 4 = myPort (11108)
 					//now calculating the assigned_node and sending it the message
 					String node_response = findAssignedNode(c_msgs[1]);
 					String[] selected_nodes = node_response.split(",");
-					/*String[] selected_nodes = new String[3];
-					if(myPort.equals("11124")){
-						selected_nodes[0] = "11124"; selected_nodes[1] = "11112"; selected_nodes[2] = "11108";
-					}else if(myPort.equals("11112")){
-						selected_nodes[0] = "11112"; selected_nodes[1] = "11108"; selected_nodes[2] = "11116";
-					}else if(myPort.equals("11108")){
-						selected_nodes[0] = "11108"; selected_nodes[1] = "11116"; selected_nodes[2] = "11120";
-					}else if(myPort.equals("11116")){
-						selected_nodes[0] = "11116"; selected_nodes[1] = "11120"; selected_nodes[2] = "11124";
-					}else if(myPort.equals("11120")){
-						selected_nodes[0] = "11120"; selected_nodes[1] = "11124"; selected_nodes[2] = "11112";
-					}else{
-						Log.e(P_TAG, "IMPOSSIBLE, NEVER SHOULD REACH HERE ???????????????????????????????????????????????????????????????????????????????????????????????????????????");
-					} */
+
 					String msgToSend = "INSERT_MSG" + "," + c_msgs[1] + "," + c_msgs[2] + "," + selected_nodes[0] + "," + selected_nodes[1] + "," + selected_nodes[2];
 					for (int i=0; i<3 ; i++){ //send message to assigned node and 2 replicated nodes
+						int flag =1;
 						Log.e(P_TAG, "Client sending and replicating key = " + c_msgs[1] + " value = " + c_msgs[2] + " to server = " + selected_nodes[i] + " i = " + i + " " + selected_nodes[0] + " " + selected_nodes[1] + " " + selected_nodes[2]);
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(selected_nodes[i]) );
 						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
@@ -314,9 +469,46 @@ public class SimpleDynamoProvider extends ContentProvider {
 						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
 						// msgToSend = INSERT_MSG, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(myPort);
 						out.println(msgToSend);
 						out.println("AAI_GAYU");
 						String temp;
+
+						temp = in.readLine(); //checking if the server is alive or not
+						Log.e(P_TAG, "ALIVE MESSAGE PING FROM SERVER: " + temp);
+						if(temp == null && remotePorts.size() == 5){
+                            Log.e(P_TAG,"-----------------------------------PARTIKS WON OVER SOCKETS !!!! crashed server = " + remotePorts.get(i) + " for msg = " + c_msgs[0]);
+							failed_index = remotePorts.indexOf(selected_nodes[i]);
+							Log.e(P_TAG, "FAILED INDEX = " + failed_index);
+							failed_avd = remotePorts.get(failed_index);
+							//remotePorts.remove(failed_index);
+							connected_sieve[failed_index]=0;
+							continue;
+							//recalculating the new replication node which should replace the above node for temporary purposes
+
+							// coordinator node failed then we don't worry and just let the code send the replicas to replication nodes
+							/*
+							if(i != 0){ //if one of the replica nodes failed, we need to find another temporary replica node (successor of the failed node or successor of the successor)
+								i-=1;
+								if(i==1){
+									//directly assigning the 2nd node (successor of successor) from failed node as the successor of failed node will get the failed node's index (that's why just +1 and not +2)
+									//ex: coordinator node is avd1 (11112), and avd0 (11108) fails, then we directly assign the avd3 (11120) to be the replica node in place of avd0
+									if(failed_index +1 > 3){ //it's a circle, so handling last and 2nd last nodes failure cases
+										selected_nodes[i]=remotePorts.get(failed_index+1 -4);
+									}else{
+										selected_nodes[i]=remotePorts.get(failed_index+1);
+									}
+								} else if(i==2){
+									//as the failed node is removed, the successor gets the index of failed node in remotePorts array
+									//ex: same as above, just that avd2 (11116) fails, then we assign the avd3 (11120) to be the replica node in place of avd2
+									selected_nodes[i]=remotePorts.get(failed_index);
+								}
+							}
+							Log.e(P_TAG, "AFTER PARTIKS RECOGNIZED FAILURE, SELECTED_NODES ARRAY = " + selected_nodes[0] + ", " + selected_nodes[1] + ", "+ selected_nodes[2]);
+							*/
+
+                            //flag = 0;
+                        }
 						while ((temp = in.readLine()) != null) {
 							if ("SERVER_AAI_GAYU".equals(temp)) {
 								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
@@ -329,48 +521,52 @@ public class SimpleDynamoProvider extends ContentProvider {
 				else if(c_msgs[0].equals("QUERY_KEY")){
 					String node_response = findAssignedNode(c_msgs[1]);
 					String[] selected_nodes = node_response.split(",");
-					/*String[] selected_nodes = new String[3];
-					Log.e(P_TAG, ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> MYPORT BITCHES = "+myPort);
-					if(myPort.equals("11124")){
-						selected_nodes[0] = "11124"; selected_nodes[1] = "11112"; selected_nodes[2] = "11108";
-					}else if(myPort.equals("11112")){
-						selected_nodes[0] = "11112"; selected_nodes[1] = "11108"; selected_nodes[2] = "11116";
-					}else if(myPort.equals("11108")){
-						selected_nodes[0] = "11108"; selected_nodes[1] = "11116"; selected_nodes[2] = "11120";
-					}else if(myPort.equals("11116")){
-						selected_nodes[0] = "11116"; selected_nodes[1] = "11120"; selected_nodes[2] = "11124";
-					}else if(myPort.equals("11120")){
-						selected_nodes[0] = "11120"; selected_nodes[1] = "11124"; selected_nodes[2] = "11112";
-					}else{
-						Log.e(P_TAG, "IMPOSSIBLE, NEVER SHOULD REACH HERE ???????????????????????????????????????????????????????????????????????????????????????????????????????????");
-					} */
+
 					String msgToSend = "QUERY_KEY" + "," + c_msgs[1] + "," + myPort + "," + selected_nodes[0] + "," + selected_nodes[1] + "," + selected_nodes[2];
 					String resp_values[] = new String[3];
 					int versions[]={0,0,0};
-					for (int i=0; i<3 ; i++){ //send message to assigned node and 2 replicated nodes
+					for (int i=0; i<3 ; i++) { //send message to assigned node and 2 replicated nodes
 						Log.e(P_TAG, "Client querying for key = " + c_msgs[1] + " to server = " + selected_nodes[i]);
-						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(selected_nodes[i]) );
+						socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(selected_nodes[i]));
 						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
 						out = new PrintWriter(socket.getOutputStream(), true);
 						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+						//int flag=1;
 
 						// msgToSend = QUERY, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(myPort);
 						out.println(msgToSend);
 						out.println("AAI_GAYU");
 						String temp;
-						String query_response = in.readLine();
+						String query_response = in.readLine(); //checking from this message only if the server is alive or not
 
+						Log.e(P_TAG, "ALIVE MESSAGE PING FROM SERVER: " + query_response);
+						if (query_response == null && remotePorts.size() == 5) {
+							Log.e(P_TAG, "-----------------------------------PARTIKS WON OVER SOCKETS !!!! crashed server = " + selected_nodes[i] + " for msg = " + c_msgs[0]);
+							failed_index = remotePorts.indexOf(selected_nodes[i]);
+							Log.e(P_TAG, "FAILED INDEX = " + failed_index);
+							failed_avd = remotePorts.get(failed_index);
+							//remotePorts.remove(failed_index);
+							connected_sieve[failed_index]=0;
+							//i-=1;
+							//flag = 0;
+							continue;
+						}
+						//while ((temp != null) || flag == 1) {
 						while ((temp = in.readLine()) != null) {
 							if ("SERVER_AAI_GAYU".equals(temp)) {
-								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+								Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0]); //+ " loop iteration " + i);
 								break;
 							}
 						}
-						Log.e(P_TAG, "Client got response for key = " + c_msgs[1] + " RESP: " + query_response);
-						String[] resp = query_response.split(",");
-						// key = resp[0], value = resp[1], version = resp[2]
-						versions[i] = Integer.parseInt(resp[2]);
-						resp_values[i] = resp[1];
+						//if(flag != 0){ //if server is alive, only then read its response values and version number
+							Log.e(P_TAG, "Client got response for key = " + c_msgs[1] + " RESP: " + query_response);
+							String[] resp = query_response.split(",");
+							// key = resp[0], value = resp[1], version = resp[2]
+							versions[i] = Integer.parseInt(resp[2]);
+							resp_values[i] = resp[1];
+						//}
+
 					}
 					int max=0;
 					for(int j=1; j<3; j++){
@@ -390,8 +586,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 				}
 				else if(c_msgs[0].equals("GIMME_ALL")){
 					String msgToSend = c_msgs[0];
-					String responses=null;
-					for( int i=0; i<remotePorts.size(); i++){
+					String responses="";
+					for( int i=0; i<5; i++){
 						Log.e(P_TAG, "Client querying for key = " + c_msgs[1] + " to server = " + remotePorts.get(i));
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
 						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
@@ -399,10 +595,69 @@ public class SimpleDynamoProvider extends ContentProvider {
 						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
 						// msgToSend = QUERY, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(myPort);
 						out.println(msgToSend);
 						out.println("AAI_GAYU");
 						String temp;
-						responses = responses + in.readLine();
+						temp = in.readLine();
+						Log.e(P_TAG, "INDIVIDUAL SERVER MEGA RESPONSES = " + responses + " from SERVER = "+ remotePorts.get(i));
+						if(temp == null || temp.equals("")){
+							//identified the crashed AVD, importing its messages from one of its replication nodes
+							String my_rep_nodes[] = new String[2];
+							if(remotePorts.get(i).equals("11124")){
+								my_rep_nodes[0]="11112";
+								my_rep_nodes[1]="11108";
+							}else if(remotePorts.get(i).equals("11112")){
+								my_rep_nodes[0]="11108";
+								my_rep_nodes[1]="11116";
+							}else if(remotePorts.get(i).equals("11108")){
+								my_rep_nodes[0]="11116";
+								my_rep_nodes[1]="11120";
+							}else if(remotePorts.get(i).equals("11116")){
+								my_rep_nodes[0]="11120";
+								my_rep_nodes[1]="11124";
+							}else if(remotePorts.get(i).equals("11120")){
+								my_rep_nodes[0]="11124";
+								my_rep_nodes[1]="11112";
+							}
+							for(int j=0; j<1; j++){
+								socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(my_rep_nodes[j]) );
+								Log.e(P_TAG, "COLLECTING CRASHED NODE "+ remotePorts.get(i)+ " MESSAGES FROM  " + my_rep_nodes[j] + " FOR * QUERY");
+								out = new PrintWriter(socket.getOutputStream(), true);
+								in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+								out.println(myPort);
+								out.println("GIVE_MY_MESSAGES"+ "," + myPort + "," + remotePorts.get(i)); //first one is for getting result back from server, second one is for letting server know which target assigned_nodes we are searching for
+								String temp2;
+								String result = in.readLine();
+								Log.e(P_TAG, "TROUBLING RESULT STRING =" + result + "())))))))))))))))))))))))))))))))))))))))))))))))))))))))((((((((((((((((((((((((((");
+								if(result == null || result.equals("")){
+									my_rep_nodes[j] = my_rep_nodes[j+1]; //read from second replication node
+									j--;
+									continue;
+								}
+								responses = responses + result;
+
+								/*String own_pairs[] = result.split("_");
+								if(result == null || result.equals("") || own_pairs.length<1){
+									continue;
+								}
+								for(int j=0;j<own_pairs.length; j++){
+									String[] values = own_pairs[j].split(",");
+									// 0 - key, 1 - value, 2 - version
+									msgs.add(new Message(values[0], values[1], myPort, Integer.parseInt(values[2])) );
+									Log.e(P_TAG, "ORIGINAL OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2]);
+								} */
+								while ((temp = in.readLine()) != null) {
+									if ("SERVER_AAI_GAYU".equals(temp)) {
+										Log.e(P_TAG, "CLIENT SUCCESSFULLY SENT MSG TO " + remotePorts.get(i) + " REMOTEPORT SIZE = " + remotePorts.size() + " sending msg " + c_msgs[0] ); //+ " loop iteration " + i);
+										break;
+									}
+								}
+							}
+							continue;
+						}
+						responses = responses + temp;
 
 						while ((temp = in.readLine()) != null) {
 							if ("SERVER_AAI_GAYU".equals(temp)) {
@@ -428,11 +683,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 					for( int i=0; i<remotePorts.size(); i++){
 						Log.e(P_TAG, "Client sending DELETE COMMAND to server = " + remotePorts.get(i));
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
-						Log.e(P_TAG, "DELTE ALL * CLIENT TASK: " + msgs2[0]);
+						Log.e(P_TAG, "DELETE ALL * CLIENT TASK: " + msgs2[0]);
 						out = new PrintWriter(socket.getOutputStream(), true);
 						in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
 						// msgToSend = QUERY, KEY, VALUE, assigned_node, replication_node 1, replication node 2
+						out.println(myPort);
 						out.println(msgToSend);
 						out.println("AAI_GAYU");
 						String temp;
@@ -479,6 +735,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+		while(sync_flag==0){
+
+		}
 		Log.e(P_TAG, "Called QUERY " + selection + " from SimpleDhtProvider " + myPort);
 		ListIterator<Message> itr;
 		if(!selection.equals("*") && !selection.equals("@")){ // queried with a specific key
@@ -506,11 +765,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 			while(itr.hasNext()){
 				Message m2 = itr.next();
 				//Log.e(P_TAG, "m2 Key = " + m2.getKey() + " m2 msg = " + m2.getMessage() + "m2 assigned node = " + m2.getAssignedNode());
-				if(m2.getAssignedNode().equals( myPort )){
-					Log.e(P_TAG, "@@ 1 - MSG KEY: " + m2.getKey() + " Message: " + m2.getMessage() + " found for node: ");
-					String[] value = {m2.getKey(), m2.getMessage()};
-					m.addRow(value);
-				}
+				//if(m2.getAssignedNode().equals( myPort )){
+				Log.e(P_TAG, "@@ 1 - MSG KEY: " + m2.getKey() + " Message: " + m2.getMessage() + " ASSIGNED_NODE : " + m2.getAssignedNode());
+				String[] value = {m2.getKey(), m2.getMessage()};
+				m.addRow(value);
+				//}
 			}
 			return m;
 		}
@@ -562,6 +821,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 				}
 			} */
 		}else{
+			msgs.removeAll(msgs);
 			int m_index=-1;
 			Message m2 = null;
 			for(Message m : msgs){
@@ -630,32 +890,19 @@ public class SimpleDynamoProvider extends ContentProvider {
 		int found_flag = 0;
 
 		//first checking the edge case of wether the key belongs to first node i.e. 5554 (greater than the last node as well as all keys that are smaller than the first node
-		//get the last node connected according to sequence: avd 1,4,3,2
-		int last_node=-1;
-		int first_node=-1;
-		int x=0;
-		while(x<5){
-			//Log.e(P_TAG, "LOOP 1" + " x = " + x + " connection status = "+ connected_sieve[x]);
-			if(connected_sieve[x] == 1){
-				first_node=x;
-				break;
-			}
-			x++;
-		}
-		x=4; found_flag = 0;
-		while(x>0){
-			//Log.e(P_TAG, "LOOP 2" + " x = " + x + " connection status = "+ connected_sieve[x]);
-			if(connected_sieve[x] == 1){
-				last_node=x;
-				break;
-			}
-			x--;
-		}
+		//get the last node connected according to sequence: avd 3,2,0,1,4
 
 
-		Log.e(P_TAG, " MSG_KEY_HASH = " + msg_key_hash + "KEY: " + key+" last_node = " + last_node);
-		if(msg_key_hash.compareTo(hashed_nodes.get(last_node)) > 0 && msg_key_hash.compareTo(hashed_nodes.get(first_node)) > 0){
-			if(first_node == 0){
+		Log.e(P_TAG, " MSG_KEY_HASH = " + msg_key_hash + "KEY: " + key+" last_node = avd3 [4] first node = avd4 [0]");
+		if(msg_key_hash.compareTo(hashed_nodes.get(4)) > 0 && msg_key_hash.compareTo(hashed_nodes.get(0)) > 0){
+			//assign the key to first node if above condition gets satisfied
+				Log.e(P_TAG, "----- ASSIGNED NODE WHILE REMOTE PORT SIZE = " + remotePorts.size());
+				assigned_node="11124";
+				rep_node1="11112";
+				rep_node2="11108";
+				found_flag=1;
+
+			/*if(first_node == 0){
 				//assigned_node = "5562"; rep_node1 = "5556"; rep_node2="";
 				assigned_node = "11124"; rep_node1 = "11112"; rep_node2="11108";
 				found_flag = 1;
@@ -681,20 +928,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 				found_flag = 1;
 				Log.e(P_TAG, "1 - CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
 				//break;
-			}
+			} */
 		}
 
 		if(found_flag == 0){
 			//iteratively find the node which will be responsible for the key.
-
 			//for ( int i=0; i<(remotePorts.size() + x) ; i++ ){
-			for ( int i=0; i<5 ; i++ ){
+			for ( int i=0; i < 5; i++){
 				//Log.e(P_TAG, "COMPARING = " + msg_key_hash + " to " +hashed_nodes.get(i)+ " connection status= " + connected_sieve[i] + " i= " + i);
-				if(connected_sieve[i] == 0){
-					continue;
-				}
-				if( msg_key_hash.compareTo(hashed_nodes.get(i)) <= 0 && connected_sieve[i] == 1){
-					//if( msg_key_hash.compareTo(hashed_nodes.get(i-1)) > 0 ){ //edge case remaining to check if the predecessor node has been connected or not
+				if( msg_key_hash.compareTo(hashed_nodes.get(i)) <= 0){
+					//found the desired node
 					if(i == 0){
 						assigned_node = "11124"; rep_node1 = "11112"; rep_node2="11108";
 						Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
@@ -718,17 +961,42 @@ public class SimpleDynamoProvider extends ContentProvider {
 					}else{
 						Log.e(P_TAG, "WEIRD, ASSIGNED NODE FINDING LOOP ELSE HIT CAME OUT !!!");
 					}
-					//}
-
+					break;
 				}
 			}  //end of for loop
 		} //end of else or found_flag if
 
+		Log.e(P_TAG, "1 - CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key +" rep_node1 = "+ rep_node1 + " rep_node2 = "+ rep_node2 + ">>>>>>>>>>>>>>>>>>>>>>>");
 		String responseStr = assigned_node + "," + rep_node1 + ","+ rep_node2;
 
 		return responseStr;
 	}
 
+	public void initializeConnectionsAndHashedNodes(){
+		/*if(i == 0){
+			assigned_node = "11124"; rep_node1 = "11112"; rep_node2="11108";
+			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
+			break;
+		}else if(i == 1){
+			assigned_node = "11112"; rep_node1="11108"; rep_node2 = "11116";
+			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
+			break;
+		}else if(i == 2){
+			assigned_node = "11108"; rep_node1="11116"; rep_node2 = "11120";
+			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
+			break;
+		}else if(i == 3){
+			assigned_node = "11116"; rep_node1="11120"; rep_node2 = "11124";
+			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
+			break;
+		}else if (i == 4){
+			assigned_node = "11120"; rep_node1="11124"; rep_node2 = "11112";
+			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
+			break;
+		}else{
+			Log.e(P_TAG, "WEIRD, ASSIGNED NODE FINDING LOOP ELSE HIT CAME OUT !!!");
+		} */
+	}
 
 
 	private String genHash(String input) throws NoSuchAlgorithmException {
