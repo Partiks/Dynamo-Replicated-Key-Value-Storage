@@ -1,9 +1,10 @@
 flag=1
 count=0
-while [ $flag -ne 0 ]
+while { [ $flag -ne 0 ] || [ $count -eq 5 ]; }
 do
-	/media/partiks/Study/586-DS/DS\ Android\ Projects/SimpleDynamo/simpledynamo-grading.linux -p 3 ./app/build/outputs/apk/debug/app-debug.apk | tee /dev/tty >> new_shell_grader_output.txt
-	tail -n 10 new_shell_grader_output.txt | grep -q -e "no pass" -e "not found" -e "never sent"
+	/media/partiks/Study/586-DS/DS\ Android\ Projects/SimpleDynamo/simpledynamo-grading.linux ./app/build/outputs/apk/debug/app-debug.apk | tee /dev/tty > shell_grader_output.txt
+	cat shell_grader_output.txt >> new_shell_grader_output.txt
+	cat shell_grader_output.txt | grep -q -e "not found" -e "never sent" -e "failed" -e "still has data" -e "No query result for key" -e "Incorrect value" -e "no pass" -e "Timed out" -e "Values different" -e "items are stored"
 	#echo "second line executed"
 	#echo $grader_output 
 	#echo "third line executed"
@@ -13,5 +14,7 @@ do
 	echo "-------------------------------------------------------------------------------------------------"
 	count=$((count+1))
 	echo "Successful Count = " $count
-	echo "Successful Count = " $count >> shell_grader_output.txt
+	echo "Successful Count = " $count >> new_shell_grader_output.txt
+	echo "-------------------------------------------------------------------------------------------------" >> new_shell_grader_output.txt
+	echo "  " >> new_shell_grader_output.txt
 done

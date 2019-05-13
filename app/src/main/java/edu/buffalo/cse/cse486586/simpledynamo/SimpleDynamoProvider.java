@@ -39,7 +39,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 	private static final String NODE_FIELD = "node";
 	private static final String VERSION_FIELD = "version";
 	static String failed_avd="";
-	static int[] connected_sieve = {0,0,0,0,0};
+	//static int[] connected_sieve = {0,0,0,0,0};
 	static ArrayList<String> remotePorts = new ArrayList<String>();
 	static ArrayList<String> hashed_nodes = new ArrayList<String>();
 	ArrayList<Message> msgs = new ArrayList<Message>(); //msgs has the latest copy of the message
@@ -47,9 +47,10 @@ public class SimpleDynamoProvider extends ContentProvider {
 	String portStr="";
 	String myPort="";
 	static final int SERVER_PORT = 10000;
+	static int msg_list_access=0;
 	int myIndex=-1;
-	int failed_index=-4;
-	static int sync_flag =0;
+	//int failed_index=-4;
+	static int sync_flag =1;
 	static int first_time_initialized=0;
 	String node_id;
 	public static void setRemotePorts(ArrayList<String> remotePorts) { SimpleDynamoProvider.remotePorts = remotePorts;}
@@ -61,11 +62,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 	@Override
 	public boolean onCreate() {
 		Log.e(P_TAG, "Called ONCREATE from SimpleDhtProvider");
+		sync_flag=0;
 
 		TelephonyManager tel = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
 		portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
 		myPort = String.valueOf((Integer.parseInt(portStr) * 2));
 		//remotePorts.add(myPort);
+		//String test_str = "lol_";
+		//String test[] = test_str.split("_");
+		//Log.e(P_TAG, "PARTIKS >LENGTH TEST = " + test_str + " LENGTH = " + test.length + " test[0] = "+ test[0]);
+
 
 
 		try {
@@ -87,6 +93,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 		Log.e(P_TAG, "SERVER " + portStr + " / " + myPort + " got node_id: "+ node_id);
 		msgs.removeAll(msgs);
+
 		if(portStr.equals("5562")){ myIndex=0; } else if(portStr.equals("5556")){ myIndex=1; } else if(portStr.equals("5554")){ myIndex=2; } else if(portStr.equals("5558")){ myIndex=3; } else if(portStr.equals("5560")){ myIndex=4; }
 		Log.e(P_TAG, "SERVER: TRYING TO CREATE SERVER SOCKET - " + SERVER_PORT + " " + myPort);
 		ServerSocket serverSocket = null;
@@ -104,7 +111,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		} */
 
 		//end partiks setup
-		first_time_initialized=1;
+		//first_time_initialized=1;
 		return false;
 	}
 
@@ -123,8 +130,15 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String assigned_node = values.getAsString("node");
 		String version = values.getAsString("version");
 
-		while(sync_flag==0){
+		//while(sync_flag==0){
 
+		//}
+		if(sync_flag == 0){
+			try {
+				Thread.sleep(3000);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
 		}
 
 		if(assigned_node == null){ // new message inserted by grader
@@ -135,12 +149,17 @@ public class SimpleDynamoProvider extends ContentProvider {
 		else{ //msg is assigned a node and is replicated to required nodes
 			// destination node is selected till now, now time to store the message
 
-			msgs.add( new Message(key, value, assigned_node, Integer.parseInt(version)) );
-			Log.e(P_TAG, "---- NEW KEY "+ values.getAsString("key"));
-			Log.e(P_TAG, "---- NEW VALUE "+ values.getAsString("value"));
-			Log.e(P_TAG, "---- NEW ASSIGNED NODE:  "+ assigned_node);
-			Log.e(P_TAG, "---- NEW VERSION:  "+ values.getAsString("version"));
+			//msgs.add( new Message(key, value, assigned_node, Integer.parseInt(version)) );
+			Log.e(P_TAG, "---- INSERT NOT NEW KEY "+ values.getAsString("key"));
+			Log.e(P_TAG, "---- INSERT NOT NEW VALUE "+ values.getAsString("value"));
+			Log.e(P_TAG, "---- INSERT NOT NEW ASSIGNED NODE:  "+ assigned_node);
+			Log.e(P_TAG, "---- INSERT NOT NEW VERSION:  "+ values.getAsString("version"));
 		}
+		/*try {
+			Thread.sleep(500);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} */
 
 		//partiks code end
 		return uri;
@@ -175,30 +194,27 @@ public class SimpleDynamoProvider extends ContentProvider {
 						found_crashed_avd_flag = 1;
 						Log.e(P_TAG, "SERVER READ A LINE:  = " + temp);
 						String msg_string[] = temp.split(",");
+						
 						if ("GIVE_MY_MESSAGES".equals(msg_string[0])) {
 							//considering this is replica node and coordinator node is requesting messages
 							//String target_node = msg_string[1];
 							String selection_node = msg_string[2];
 							Log.e(P_TAG, "SERVER IMPORT REQUEST FROM "+sender + " SELECTION SERVER = " + selection_node);
-							itr = msgs.listIterator();
-							while(itr.hasNext()) {
-								Message m2 = itr.next();
-								if(m2.getAssignedNode().equals(selection_node)){
-									Log.e(P_TAG, "&& SENDING IMPORT REQ MSG "+m2.getKey() + " , message = " + m2.getMessage() + " ," + m2.getVersion() + " to " + sender);
-								}
-							}
 							String response_msg="";
+							msg_list_access = 1;
 							itr = msgs.listIterator();
 							while(itr.hasNext()) {
 								Message m2 = itr.next();
 								if(m2.getAssignedNode().equals(selection_node)){
+									Log.e(P_TAG, "&& SENDING IMPORT REQ MSG "+m2.getKey() + " , message = " + m2.getMessage() + " , " + m2.getVersion() + " to " + sender);
 									response_msg = response_msg + m2.getKey() + "," + m2.getMessage()+","+m2.getVersion()+"_";
 								}
 							}
+							msg_list_access = 0;
 							out.println(response_msg);
 							break;
 
-						}else if ("NODE_ONCREATE".equals(msg_string[0])) {
+						}/*else if ("NODE_ONCREATE".equals(msg_string[0])) {
 							Log.e(P_TAG, "Node create/rejoin request from: " + msg_string[1] + " ");
 							int re_node = Integer.parseInt(msg_string[1]);
 							if(re_node == 11112){ //avd 1
@@ -218,7 +234,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 							else { Log.e(P_TAG, "SHOULD NEVER HAVE REACHED HERE! NODE REJOINING ELSE"); }
 							break;
 
-						}else if("INSERT_MSG".equals(msg_string[0])){
+						}*/
+						else if("INSERT_MSG".equals(msg_string[0])){
 							Log.e(P_TAG, " SERVER GOT NEW MESSAGE KEY = " + msg_string[1] + " value = " + msg_string[2]);
 
 							//key = msg_string[1], value = msg_string[2]
@@ -226,26 +243,72 @@ public class SimpleDynamoProvider extends ContentProvider {
 							int msg_found_flag =0;
 							int curr_version=-4;
 							Message m;
+							msg_list_access = 1;
 							for(int i=0; i<msgs.size(); i++){
 								if(msgs.get(i).getKey().equals(msg_string[1])){
 									//we only need to update the version number and message
-									msg_found_flag=1;
 									m = msgs.get(i);
+									msgs.remove(m);
+									Log.e(P_TAG, "FOUND EXISTING KEY= " + msg_string[1] + " , new updated value = " + msg_string[2]);
+									msg_found_flag=44;
 									//stale_msgs.add(m);
 									curr_version = m.getVersion();
-									msgs.set(i, new Message(m.getKey(), msg_string[2], m.getAssignedNode(), curr_version+1));
+									msgs.add(new Message(m.getKey(), msg_string[2], m.getAssignedNode(), curr_version+1));
+									break;
 								}
 							}
 
 							//new message, doesn't exist in msgs queue
 							if(msg_found_flag == 0){
-								curr_version=1;
-								msgs.add( new Message(msg_string[1], msg_string[2], msg_string[3], curr_version) );
+								Log.e(P_TAG, "MSG_FOUND_FLAG WAS ZERO = " + msg_found_flag);
+								msgs.add( new Message(msg_string[1], msg_string[2], msg_string[3], 1) );
 							}
+							msg_list_access = 0;
+							/*itr = msgs.listIterator();
+
+							int count=0,z=0;
+							Message extra[] = new Message[3];
+							Log.e(P_TAG, "------------------------------------------------------");
+							while (itr.hasNext()) {
+								Message m3 = itr.next();
+								Log.e(P_TAG, "MSG ID:          " + m3.getKey());
+								Log.e(P_TAG, "MSG CONTENT:     " + m3.getMessage());
+								Log.e(P_TAG, "MSG ASSIGNED NODE:      " + m3.getAssignedNode());
+								Log.e(P_TAG, "MSG SEND:        " + m3.getVersion());
+								Log.e(P_TAG, "<>");
+								if(m3.getKey().equals(msg_string[1])){
+									count++;
+									extra[z] = m3;
+									z++;
+								}
+								if(count > 1){
+									if(extra[0].getVersion() > extra[1].getVersion()){
+										msgs.remove(extra[1]);
+									}else{
+										msgs.remove(extra[0]);
+									}
+								}
+							}
+							Log.e(P_TAG, "------------------------------------------------------"); */
+							/*Log.e(P_TAG, "--");
+							Log.e(P_TAG, "--");
+							Log.e(P_TAG, "--");
+							Log.e(P_TAG, "--");
+							Log.e(P_TAG, "------------------------------------------------------");
+							itr = msgs.listIterator();
+							while (itr.hasNext()) {
+								Message m3 = itr.next();
+								Log.e(P_TAG, "MSG ID:                " + m3.getKey());
+								Log.e(P_TAG, "MSG CONTENT:           " + m3.getMessage());
+								Log.e(P_TAG, "MSG ASIGNED NODE:      " + m3.getAssignedNode());
+								Log.e(P_TAG, "MSG SEND:              " + m3.getVersion());
+								Log.e(P_TAG, "<>");
+							}
+							Log.e(P_TAG, "------------------------------------------------------"); */
 							// version is assigned to the message now time to store the message
 
 							//Log.e(P_TAG, "STORING MESSAGE OF " + assigned_node + " key = " + c_msg[1]);
-							Uri.Builder uriBuilder = new Uri.Builder();
+							/*Uri.Builder uriBuilder = new Uri.Builder();
 							uriBuilder.authority("edu.buffalo.cse.cse486586.simpledht.provider");
 							uriBuilder.scheme("content");
 							Uri uri = uriBuilder.build();
@@ -256,7 +319,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 							cv.put(NODE_FIELD, msg_string[3]);
 							cv.put(VERSION_FIELD, curr_version);
 
-							insert(uri, cv);
+							insert(uri, cv); */
 							out.println("I'M ALIVE" + "," + myPort);
 							break;
 
@@ -267,13 +330,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 							String key = msg_string[1];
 							String msgToSend=null;
 							Log.e(P_TAG, "NEW TARGET NODE TO SEND CURSOR: " + target_node);
+							msg_list_access = 1;
 							for(int i=0; i<msgs.size(); i++){
 								if(msgs.get(i).getKey().equals(key)){
 									Message m = msgs.get(i);
 									msgToSend = m.getKey() + "," + m.getMessage() + "," + m.getVersion();
 									out.println(msgToSend);
+									break;
 								}
 							}
+							msg_list_access = 0;
 							break;
 
 							//returning cursor to target_node
@@ -281,6 +347,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 						} //end of else if QUERY_KEY
 						else if("GIMME_ALL".equals(msg_string[0])){
 							String response_msg="";
+							msg_list_access = 1;
 							itr = msgs.listIterator();
 							while(itr.hasNext()) {
 								Message m2 = itr.next();
@@ -288,6 +355,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 									response_msg = response_msg + m2.getKey() + "," + m2.getMessage()+"_";
 								}
 							}
+							msg_list_access = 0;
 							out.println(response_msg);
 							break;
 
@@ -307,11 +375,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 					}
 					if(found_crashed_avd_flag == 0){
 						Log.e(P_TAG, "SERVER FOUND CRASHED AVD --------------------->>>>>>>>>> " + sender);
-						failed_index = remotePorts.indexOf(sender);
+						//failed_index = remotePorts.indexOf(sender);
 						//remotePorts.remove(sender);
-						connected_sieve[failed_index]=0;
+						//connected_sieve[failed_index]=0;
 						failed_avd=sender;
-						Log.e(P_TAG, "SERVER FOUND CRASHED " + " failed_index = " + failed_index + " remotePorts.size() = " + remotePorts.size() + " failed_avd = " + failed_avd);
+						Log.e(P_TAG, "SERVER FOUND CRASHED " + " failed_index = " +/* failed_index +*/ " remotePorts.size() = " + remotePorts.size() + " failed_avd = " + failed_avd);
 					}
 					out.println("SERVER_AAI_GAYU");
 					in.close();
@@ -338,7 +406,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			try {
 
 				if(c_msgs[0].equals("NODE_ONCREATE")){
-					for(int i=0; i<5; i++){
+					/*for(int i=0; i<5; i++){
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
 						Log.e(P_TAG, "NEW MESSAGE CLIENT TASK: " + msgs2[0]);
 						out = new PrintWriter(socket.getOutputStream(), true);
@@ -353,7 +421,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 								break;
 							}
 						}
-					}// end of broadcasting for loop
+					}// end of broadcasting for loop */
 
 					String my_rep_nodes[] = new String[2];
 					if(myPort.equals("11124")){
@@ -390,11 +458,38 @@ public class SimpleDynamoProvider extends ContentProvider {
 						if(result == null || result.equals("") || own_pairs.length<1){
 							continue;
 						}
+						int skip_flag=0, delete_flag=0, msg_index=-4;
 						for(int j=0;j<own_pairs.length; j++){
 							String[] values = own_pairs[j].split(",");
+							skip_flag=0;
 							// 0 - key, 1 - value, 2 - version
-							msgs.add(new Message(values[0], values[1], myPort, Integer.parseInt(values[2])) );
-							Log.e(P_TAG, "ORIGINAL OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2]);
+							while(msg_list_access != 0){
+								//wait for server to complete it's access
+								Thread.sleep(300);
+								Log.e(P_TAG, " [[[[[[[[[[[[[[[[[[[[[[[[[[[[[ CLIENT WAITING TO ACCESS MSG LIST ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]");
+							}
+							for(int z=0; z<msgs.size(); z++){
+								if(msgs.get(z).getKey().equals(values[0])){
+									if(Integer.parseInt(values[2]) > msgs.get(z).getVersion()){
+										delete_flag=1;
+										msg_index=z;
+										break;
+									}
+									if(msgs.get(z).getVersion() >= Integer.parseInt(values[2])){
+										skip_flag=1;
+										break;
+									}
+								}
+							}
+							if(skip_flag == 0){
+								msgs.add(new Message(values[0], values[1], myPort, Integer.parseInt(values[2])) );
+								Log.e(P_TAG, "ORIGINAL OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " from server = " + my_rep_nodes[i]);
+							}
+							if(delete_flag == 1){
+								msgs.remove(msg_index);
+								msgs.add(new Message(values[0], values[1], myPort, Integer.parseInt(values[2])) );
+								Log.e(P_TAG, "ORIGINAL OWN IMPORTED UPDATED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " from server = " + my_rep_nodes[i]);
+							}
                     	}
 						while ((temp = in.readLine()) != null) {
 							if ("SERVER_AAI_GAYU".equals(temp)) {
@@ -439,9 +534,38 @@ public class SimpleDynamoProvider extends ContentProvider {
 						if(result == null || result.equals("") || own_pairs.length<1){
 							continue;
 						}
+
+						//int skip_flag=0, delete_flag=0, msg_index=-4;
 						for(int j=0;j<own_pairs.length; j++){
 							String[] values = own_pairs[j].split(",");
 							// 0 - key, 1 - value, 2 - version
+							while(msg_list_access != 0){
+								//wait for server to complete it's access
+								Thread.sleep(300);
+								Log.e(P_TAG, " [[[[[[[[[[[[[[[[[[[[[[[[[[[[[ CLIENT WAITING TO ACCESS MSG LIST ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]");
+							}
+							/*for(int z=0; z<msgs.size(); z++){
+								if(msgs.get(z).getKey().equals(values[0])){
+									if(Integer.parseInt(values[2]) > msgs.get(z).getVersion()){
+										delete_flag=1;
+										msg_index=z;
+										break;
+									}
+									if(msgs.get(z).getVersion() >= Integer.parseInt(values[2])){
+										skip_flag=1;
+										break;
+									}
+								}
+							}
+							if(skip_flag == 0){
+								msgs.add(new Message(values[0], values[1], rep_nodes[i], Integer.parseInt(values[2])) );
+								Log.e(P_TAG, "REPLICATION OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " from server = " + rep_nodes[i]);
+							}
+							if(delete_flag == 1){
+								msgs.remove(msg_index);
+								msgs.add(new Message(values[0], values[1], rep_nodes[i], Integer.parseInt(values[2])) );
+								Log.e(P_TAG, "REPLICATION OWN IMPORTED UPDATED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " from server = " + rep_nodes[i]);
+							} */
 							msgs.add(new Message(values[0], values[1], rep_nodes[i], Integer.parseInt(values[2])) );
 							Log.e(P_TAG, "REPLICATION OWN IMPORTED KEY_VALUE PAIR: "+ values[0] + ", " + values[1] + ", version = " + values[2] + " FROM SERVER = " + rep_nodes[i]);
 						}
@@ -478,13 +602,14 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 						temp = in.readLine(); //checking if the server is alive or not
 						Log.e(P_TAG, "ALIVE MESSAGE PING FROM SERVER: " + temp);
-						if(temp == null && remotePorts.size() == 5){
+						if(temp == null){
                             Log.e(P_TAG,"-----------------------------------PARTIKS WON OVER SOCKETS !!!! crashed server = " + remotePorts.get(i) + " for msg = " + c_msgs[0]);
-							failed_index = remotePorts.indexOf(selected_nodes[i]);
-							Log.e(P_TAG, "FAILED INDEX = " + failed_index);
-							failed_avd = remotePorts.get(failed_index);
+							//failed_index = remotePorts.indexOf(selected_nodes[i]);
+							//Log.e(P_TAG, "FAILED INDEX = " + failed_index);
+							//failed_avd = remotePorts.get(failed_index);
+							failed_avd = selected_nodes[i];
 							//remotePorts.remove(failed_index);
-							connected_sieve[failed_index]=0;
+							//connected_sieve[failed_index]=0;
 							continue;
 							//recalculating the new replication node which should replace the above node for temporary purposes
 
@@ -543,13 +668,14 @@ public class SimpleDynamoProvider extends ContentProvider {
 						String query_response = in.readLine(); //checking from this message only if the server is alive or not
 
 						Log.e(P_TAG, "ALIVE MESSAGE PING FROM SERVER: " + query_response);
-						if (query_response == null && remotePorts.size() == 5) {
+						if (query_response == null) {
 							Log.e(P_TAG, "-----------------------------------PARTIKS WON OVER SOCKETS !!!! crashed server = " + selected_nodes[i] + " for msg = " + c_msgs[0]);
-							failed_index = remotePorts.indexOf(selected_nodes[i]);
-							Log.e(P_TAG, "FAILED INDEX = " + failed_index);
-							failed_avd = remotePorts.get(failed_index);
+							//failed_index = remotePorts.indexOf(selected_nodes[i]);
+							//Log.e(P_TAG, "FAILED INDEX = " + failed_index);
+							//failed_avd = remotePorts.get(failed_index);
 							//remotePorts.remove(failed_index);
-							connected_sieve[failed_index]=0;
+							//connected_sieve[failed_index]=0;
+							failed_avd = selected_nodes[i];
 							//i-=1;
 							//flag = 0;
 							continue;
@@ -624,6 +750,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 								my_rep_nodes[0]="11124";
 								my_rep_nodes[1]="11112";
 							}
+							int count=0;
 							for(int j=0; j<1; j++){
 								socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(my_rep_nodes[j]) );
 								Log.e(P_TAG, "COLLECTING CRASHED NODE "+ remotePorts.get(i)+ " MESSAGES FROM  " + my_rep_nodes[j] + " FOR * QUERY");
@@ -632,11 +759,17 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 								out.println(myPort);
 								out.println("GIVE_MY_MESSAGES"+ "," + myPort + "," + remotePorts.get(i)); //first one is for getting result back from server, second one is for letting server know which target assigned_nodes we are searching for
-								String temp2;
+
 								String result = in.readLine();
 								Log.e(P_TAG, "TROUBLING RESULT STRING =" + result + "())))))))))))))))))))))))))))))))))))))))))))))))))))))))((((((((((((((((((((((((((");
 								if(result == null || result.equals("")){
-									my_rep_nodes[j] = my_rep_nodes[j+1]; //read from second replication node
+									Log.e(P_TAG, "Original selected node didn't reply, so querying next successor. my_rep_nodes[0] = " + my_rep_nodes[0] + " my_rep_nodes[1]" + my_rep_nodes[1]);
+									count++;
+									if(count == 2){
+										j=44; //break out of this loop
+									}else{
+										my_rep_nodes[0] = my_rep_nodes[1]; //read from second replication node
+									}
 									j--;
 									continue;
 								}
@@ -684,7 +817,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 				} //end of else if navo_msg
 				else if(c_msgs[0].equals("DELETE_ALL")){
 					String msgToSend = c_msgs[0];
-					for( int i=0; i<remotePorts.size(); i++){
+					for( int i=0; i<5; i++){
 						Log.e(P_TAG, "Client sending DELETE COMMAND to server = " + remotePorts.get(i));
 						socket = new Socket(InetAddress.getByAddress( new byte[]{10, 0, 2, 2}), Integer.parseInt(remotePorts.get(i)) );
 						Log.e(P_TAG, "DELETE ALL * CLIENT TASK: " + msgs2[0]);
@@ -718,15 +851,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			} catch (IOException e) {
 				Log.e(P_TAG, "WHY IT COME HERE THOUGH ????");
 				Log.e(P_TAG, "ClientTask socket IOException");
-				//myPort="11108";
-				Log.e(P_TAG, ">>>>>>>>>>>>>> EXCEPTION >>>>>> SELF PROCLAIMED SERVER CHANGED <<<<<<<<<<<<<<<<<<<<<<<<<<<");
-				String msgReceived="";
-				//publishProgress(msgReceived);
-				try {
-					Thread.sleep(500);
-				} catch (InterruptedException e1) {
-					e1.printStackTrace();
-				}
+			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
 
@@ -739,10 +864,19 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
-		while(sync_flag==0){
+		//while(sync_flag==0){
 
-		}
+		//}
+
 		Log.e(P_TAG, "Called QUERY " + selection + " from SimpleDhtProvider " + myPort);
+		if(sync_flag == 0){
+			try {
+				Thread.sleep(1500);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+
 		ListIterator<Message> itr;
 		if(!selection.equals("*") && !selection.equals("@")){ // queried with a specific key
 			Log.e(P_TAG, "KEY PART OF IF ENTERED !");
@@ -752,7 +886,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			try {
 				MatrixCursor mat2 = as.get();
 				mat2.moveToFirst();
-				Log.e(P_TAG, "FINAL ANSWER COLUMN COUNT = " + mat2.getColumnCount() + " " + mat2.getString(0) );
+				Log.e(P_TAG, "FINAL ANSWER COLUMN COUNT = " + mat2.getColumnCount() + " , " + mat2.getString(0) );
 
 				return mat2;
 			} catch (InterruptedException e) {
@@ -763,6 +897,20 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 		}else if(selection.equals("@")){
+			try {
+				Thread.sleep(800);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+			while(msg_list_access != 0){
+				//wait for server to complete it's access
+				try {
+					Thread.sleep(300);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+				Log.e(P_TAG, " [[[[[[[[[[[[[[[[[[[[[[[[[[[[[ CLIENT WAITING TO ACCESS MSG LIST ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]");
+			}
 			itr = msgs.listIterator();
 			String[] cols = {"key","value"};
 			MatrixCursor m = new MatrixCursor(cols, 1);
@@ -775,10 +923,17 @@ public class SimpleDynamoProvider extends ContentProvider {
 				m.addRow(value);
 				//}
 			}
+			Log.e(P_TAG, "@@ EXIT MF");
+			Log.e(P_TAG, "@@ EXIT MF");
 			return m;
 		}
 
 		else if(selection.equals("*")){
+			try {
+				Thread.sleep(500);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
 			Log.e(P_TAG, "CORRECTLY ENTERED * PART OF QUERY!!");
 			String msgToSend = "GIMME_ALL" + "," + myPort;
 			AsyncTask<String, String, MatrixCursor> as = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
@@ -817,64 +972,24 @@ public class SimpleDynamoProvider extends ContentProvider {
 			new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
 		}else if(selection.equals("@")){
 			msgs.removeAll(msgs);
-			/*int m_index=-1;
-			for(Message m: msgs){
-				if(m.getAssignedNode().equals(portStr)){
-					m_index = msgs.indexOf(m);
-					msgs.remove(m_index);
-				}
-			} */
 		}else{
 			msgs.removeAll(msgs);
+			//I forgot to delete the respective key in the successor (replication nodes)
+            String msgToSend = "DELETE_ALL";
+            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgToSend);
 			int m_index=-1;
 			Message m2 = null;
 			for(Message m : msgs){
 				Log.e(P_TAG, "FINDING TO DELETE: " + m.getKey() + " - " + filename);
 				if(m.getKey().equals(filename)){
 					Log.e(P_TAG, "FOUND TO DELETE: " + m.getKey() + " - " + filename);
-					m_index = msgs.indexOf(m);
-					m2 = m;
+					msgs.remove(m);
+					//m_index = msgs.indexOf(m);
+					//m2 = m;
 					break;
 				}
 			}
 
-			if(m_index != -1){
-				Log.e(P_TAG, "TRIED AND DELETED: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
-				//msgs.remove(m_index);
-				msgs.remove(m2);
-
-
-				String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
-				File f = new File(path);
-				if(f.exists()){
-					f.delete();
-					return 0;
-				}
-			}
-			m2 = null;
-			for(Message m : msgs){
-				Log.e(P_TAG, "FINDING TO DELETE: " + m.getKey() + " - " + filename);
-				if(m.getKey().equals(filename)){
-					Log.e(P_TAG, "FOUND TO DELETE: " + m.getKey() + " - " + filename);
-					m_index = msgs.indexOf(m);
-					m2 = m;
-					break;
-				}
-			}
-
-			if(m_index != -1){
-				Log.e(P_TAG, "TRIED AND DELETED: "+ m_index + " KEY: " + msgs.get(m_index).getKey());
-				//msgs.remove(m_index);
-				msgs.remove(m2);
-
-
-				String path = getContext().getFilesDir().getAbsolutePath() + "/" + filename;
-				File f = new File(path);
-				if(f.exists()){
-					f.delete();
-					return 0;
-				}
-			}
 			return 0;
 		}
 		return 0;
@@ -975,33 +1090,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		return responseStr;
 	}
-
-	public void initializeConnectionsAndHashedNodes(){
-		/*if(i == 0){
-			assigned_node = "11124"; rep_node1 = "11112"; rep_node2="11108";
-			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
-			break;
-		}else if(i == 1){
-			assigned_node = "11112"; rep_node1="11108"; rep_node2 = "11116";
-			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
-			break;
-		}else if(i == 2){
-			assigned_node = "11108"; rep_node1="11116"; rep_node2 = "11120";
-			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
-			break;
-		}else if(i == 3){
-			assigned_node = "11116"; rep_node1="11120"; rep_node2 = "11124";
-			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
-			break;
-		}else if (i == 4){
-			assigned_node = "11120"; rep_node1="11124"; rep_node2 = "11112";
-			Log.e(P_TAG, "CHOOSING DESTINATION NODE: " + assigned_node + " for hashed key: " + msg_key_hash + " original key: " + key + ">>>>>>>>>>>>>>>>>>>>>>>");
-			break;
-		}else{
-			Log.e(P_TAG, "WEIRD, ASSIGNED NODE FINDING LOOP ELSE HIT CAME OUT !!!");
-		} */
-	}
-
 
 	private String genHash(String input) throws NoSuchAlgorithmException {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
